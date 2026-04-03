@@ -11,6 +11,12 @@
           <span class="device-label">{{ device.label }}</span>
         </div>
       </div>
+      <!-- 上传自定义图标 -->
+      <div class="upload-icon-area">
+        <button class="upload-icon-btn" @click="$refs.iconInput.click()">+ 上传图标</button>
+        <input ref="iconInput" type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp"
+          style="display:none" @change="onIconUpload" />
+      </div>
     </aside>
 
     <!-- ══ 中间：SVG 画布 ══ -->
@@ -139,6 +145,14 @@
           <input v-model="selectedEl.data.arrow" type="checkbox" @change="rerenderD3" />
           显示箭头
         </label>
+
+        <!-- 折点操作 -->
+        <div class="prop-section" style="margin-top:10px">折点</div>
+        <div class="waypoint-info">当前 {{ (selectedEl.data.waypoints || []).length }} 个折点</div>
+        <button class="tb-btn" style="width:100%;margin-top:4px" @click="addWaypoint">+ 添加折点</button>
+        <button class="tb-btn danger" style="width:100%;margin-top:4px"
+          :disabled="!(selectedEl.data.waypoints && selectedEl.data.waypoints.length)"
+          @click="clearWaypoints">清除全部折点</button>
       </template>
     </aside>
 
@@ -147,9 +161,10 @@
 
 <script>
 import * as d3 from 'd3'
-import { buildGlowFilter, createAnimLoop, drawFlowArrows } from '@/utils/flowAnimation'
+import { buildGlowFilter, createAnimLoop, drawFlowArrows, buildPolylinePath } from '@/utils/flowAnimation'
 
 const AUTOSAVE_KEY = 'topology_autosave'
+const CUSTOM_ICONS_KEY = 'topology_custom_icons'
 const HISTORY_LIMIT = 30
 
 export default {
@@ -171,7 +186,7 @@ export default {
       currentTransform: { x: 0, y: 0, k: 1 },
 
       // ── 背景设置 ──
-      canvasBg: '#0d1b2a',
+      canvasBg: '#f0f2f5',
       bgTransparent: false,
 
       // ── 清空确认状态（替代 window.confirm）──
@@ -214,6 +229,7 @@ export default {
 
   mounted() {
     this.initSVG()
+    this._restoreCustomIcons()
     this._tryRestoreAutosave()
     this.rerenderD3()
     window.addEventListener('resize', this.onResize)
@@ -319,49 +335,56 @@ export default {
         const color = edge.color || '#aaaaaa'
         const markerId = 'ea-' + color.replace(/[^a-zA-Z0-9]/g, '')
         const isSelected = self.selectedEl?.type === 'edge' && self.selectedEl?.data === edge
-        const x1 = s.x, y1 = s.y, x2 = t.x, y2 = t.y
         const strokeW = edge.width || 2
-        const motionPath = `M${x1},${y1} L${x2},${y2}`
+
+        // 构建折线顶点数组（含 waypoints）
+        const points = [
+          { x: s.x, y: s.y },
+          ...(edge.waypoints || []),
+          { x: t.x, y: t.y },
+        ]
+        const pathD = buildPolylinePath(points)
 
         const grp = edgeG.append('g')
 
-        // 粗透明 hit 区域，方便点击
-        grp.append('line')
-          .attr('x1', x1).attr('y1', y1)
-          .attr('x2', x2).attr('y2', y2)
-          .attr('stroke', 'transparent')
-          .attr('stroke-width', 14)
-          .style('cursor', 'pointer')
-          .on('click', (event) => {
-            event.stopPropagation()
-            self.selectedEl = { type: 'edge', data: edge }
-            self.rerenderD3()
-          })
+        // 粗透明 hit 区域（沿折线各段），方便点击
+        for (let i = 0; i < points.length - 1; i++) {
+          grp.append('line')
+            .attr('x1', points[i].x).attr('y1', points[i].y)
+            .attr('x2', points[i + 1].x).attr('y2', points[i + 1].y)
+            .attr('stroke', 'transparent')
+            .attr('stroke-width', 14)
+            .style('cursor', 'pointer')
+            .on('click', (event) => {
+              event.stopPropagation()
+              self.selectedEl = { type: 'edge', data: edge }
+              self.rerenderD3()
+            })
+        }
 
-        // 底层轨迹线
+        // 底层轨迹线（折线）
         const track = grp.append('path')
-          .attr('d', motionPath)
+          .attr('d', pathD)
           .attr('stroke', color)
           .attr('stroke-width', strokeW)
           .attr('fill', 'none')
-          .attr('opacity', edge.animated ? 0.2 : 1)
+          .attr('opacity', 1)
           .attr('marker-end', edge.arrow !== false ? `url(#${markerId})` : null)
           .style('cursor', 'pointer')
 
         if (isSelected) {
           track.attr('stroke-width', strokeW + 2)
-            .attr('opacity', edge.animated ? 0.5 : 1)
             .attr('filter', 'drop-shadow(0 0 4px #fff)')
         }
 
         if (edge.dashed && !edge.animated) track.attr('stroke-dasharray', '6,4')
 
-        // 流动箭头（使用公共工具，flowGap 已生效）
+        // 流动箭头（支持折线，flowGap 已生效）
         if (edge.animated) {
           drawFlowArrows({
             group: grp,
             edge,
-            x1, y1, x2, y2,
+            points,
             color,
             glowFilterId: 'ed-glow',
             animArrows: self._anim.animArrows,
@@ -369,17 +392,55 @@ export default {
           })
         }
 
-        // 标签
+        // 标签（显示在折线中间段中点）
         if (edge.label) {
+          const mid = points[Math.floor(points.length / 2)]
+          const prev = points[Math.floor(points.length / 2) - 1] || points[0]
           grp.append('text')
-            .attr('x', (s.x + t.x) / 2)
-            .attr('y', (s.y + t.y) / 2 - 7)
+            .attr('x', (mid.x + prev.x) / 2)
+            .attr('y', (mid.y + prev.y) / 2 - 7)
             .attr('text-anchor', 'middle')
             .attr('fill', color)
             .attr('font-size', 11)
             .attr('font-family', 'sans-serif')
             .attr('pointer-events', 'none')
             .text(edge.label)
+        }
+
+        // 选中边时显示折点拖拽控制柄
+        if (isSelected && edge.waypoints && edge.waypoints.length > 0) {
+          edge.waypoints.forEach((wp) => {
+            const handle = grp.append('circle')
+              .attr('cx', wp.x).attr('cy', wp.y)
+              .attr('r', 6)
+              .attr('fill', '#ffdd00')
+              .attr('stroke', '#fff')
+              .attr('stroke-width', 1.5)
+              .attr('opacity', 0.9)
+              .style('cursor', 'move')
+              .attr('pointer-events', 'all')
+
+            const drag = d3.drag()
+              .on('drag', function (event) {
+                wp.x += event.dx
+                wp.y += event.dy
+                handle.attr('cx', wp.x).attr('cy', wp.y)
+                // 更新折线路径
+                const newPoints = [
+                  { x: s.x, y: s.y },
+                  ...edge.waypoints,
+                  { x: t.x, y: t.y },
+                ]
+                track.attr('d', buildPolylinePath(newPoints))
+              })
+              .on('end', function () {
+                self._pushHistory()
+                self.rerenderD3()
+              })
+
+            handle.call(drag)
+            handle.on('click', (event) => { event.stopPropagation() })
+          })
         }
       })
     },
@@ -552,6 +613,77 @@ export default {
     // ══════════════════════════════════════════════════
     //  工具栏操作
     // ══════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
+    //  折点操作
+    // ══════════════════════════════════════════════════
+    addWaypoint() {
+      const edge = this.selectedEl?.data
+      if (!edge) return
+      const nodeMap = {}
+      this.editorNodes.forEach(n => { nodeMap[n.id] = n })
+      const s = nodeMap[edge.from]
+      const t = nodeMap[edge.to]
+      if (!s || !t) return
+
+      if (!edge.waypoints) this.$set(edge, 'waypoints', [])
+      const wps = edge.waypoints
+      // 在最后一段中点插入
+      const prev = wps.length > 0 ? wps[wps.length - 1] : { x: s.x, y: s.y }
+      const next = { x: t.x, y: t.y }
+      this._pushHistory()
+      wps.push({ x: (prev.x + next.x) / 2, y: (prev.y + next.y) / 2 })
+      this.rerenderD3()
+    },
+
+    clearWaypoints() {
+      const edge = this.selectedEl?.data
+      if (!edge) return
+      this._pushHistory()
+      this.$set(edge, 'waypoints', [])
+      this.rerenderD3()
+    },
+
+    // ══════════════════════════════════════════════════
+    //  自定义图标上传
+    // ══════════════════════════════════════════════════
+    onIconUpload(e) {
+      const file = e.target.files[0]
+      if (!file) return
+      const label = file.name.replace(/\.[^.]+$/, '')
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const src = ev.target.result  // base64 data URL
+        const type = 'custom_' + Date.now()
+        const newDevice = { type, label, src, isCustom: true }
+        this.deviceTypes.push(newDevice)
+        this._saveCustomIcons()
+      }
+      reader.readAsDataURL(file)
+      e.target.value = ''
+    },
+
+    _saveCustomIcons() {
+      try {
+        const custom = this.deviceTypes
+          .filter(d => d.isCustom)
+          .map(d => ({ type: d.type, label: d.label, src: d.src }))
+        localStorage.setItem(CUSTOM_ICONS_KEY, JSON.stringify(custom))
+      } catch (_) { /* 存储不可用时静默忽略 */ }
+    },
+
+    _restoreCustomIcons() {
+      try {
+        const raw = localStorage.getItem(CUSTOM_ICONS_KEY)
+        if (!raw) return
+        const custom = JSON.parse(raw)
+        custom.forEach(d => {
+          if (!this.deviceTypes.find(x => x.type === d.type)) {
+            this.deviceTypes.push({ ...d, isCustom: true })
+          }
+        })
+      } catch (_) { /* 数据损坏时静默忽略 */ }
+    },
+
     setFlowDir(dir) {
       if (this.selectedEl?.type === 'edge') {
         this.selectedEl.data.flowDirection = dir
@@ -688,16 +820,21 @@ export default {
     exportJSON() {
       const config = {
         version: '1.0',
-        nodes: this.editorNodes.map(n => ({
-          id: n.id,
-          deviceType: n.deviceType,
-          x: n.x,
-          y: n.y,
-          width: n.width,
-          height: n.height,
-          label: n.label,
-          labelColor: n.labelColor,
-        })),
+        nodes: this.editorNodes.map(n => {
+          const isCustom = this.deviceTypes.find(d => d.type === n.deviceType && d.isCustom)
+          return {
+            id: n.id,
+            deviceType: n.deviceType,
+            x: n.x,
+            y: n.y,
+            width: n.width,
+            height: n.height,
+            label: n.label,
+            labelColor: n.labelColor,
+            // 自定义图标写入 base64 src，便于跨设备还原
+            ...(isCustom ? { src: n.src } : {}),
+          }
+        }),
         edges: this.editorEdges.map(e => ({ ...e })),
       }
       const blob = new Blob(
@@ -859,57 +996,79 @@ export default {
 </script>
 
 <style scoped>
+/* ════════════════════════════════════════════
+   设计令牌（局部变量）
+   ════════════════════════════════════════════ */
+/* 颜色规范
+   --bg-page:    #f0f2f5   页面底色
+   --bg-panel:   #ffffff   面板白底
+   --bg-toolbar: #fafafa   工具栏浅底
+   --bg-canvas:  #f8f9fb   画布区淡白
+   --border:     #e4e8ed   标准边框
+   --border-mid: #d0d7de   稍深边框（输入框）
+   --text-primary:  #1a2332
+   --text-secondary:#5a6a7e
+   --text-muted:    #9aa5b4
+   --accent:     #2563eb   主蓝色
+   --accent-bg:  #eff4ff   蓝色浅底
+   --danger:     #ef4444
+   --danger-bg:  #fef2f2
+   --success:    #16a34a
+   --success-bg: #f0fdf4
+*/
+
 /* ── 整体布局 ── */
 .editor-layout {
   display: flex;
   height: 100%;
   min-height: 680px;
-  background: #06101e;
-  color: #c8e0f8;
+  background: #f0f2f5;
+  color: #1a2332;
   font-size: 13px;
 }
 
-/* ── 左侧设备面板 ── */
+/* ══════════════════════════════════════════
+   左侧设备面板
+   ══════════════════════════════════════════ */
 .device-panel {
-  width: 110px;
+  width: 116px;
   flex-shrink: 0;
-  background: #0b1a2e;
-  border-right: 1px solid #1a3a5c;
-  padding: 8px 6px 8px;
+  background: #ffffff;
+  border-right: 1px solid #e4e8ed;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.device-list {
-  flex: 1;
-  overflow-y: overlay;
-  overflow-x: hidden;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color 0.3s;
-}
-.device-list:hover {
-  scrollbar-color: #2a5a8a #0b1a2e;
-}
-
-/* ── Webkit 自定义滚动条 ── */
-.device-list::-webkit-scrollbar { width: 4px; }
-.device-list::-webkit-scrollbar-track { background: transparent; border-radius: 2px; }
-.device-list::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; transition: background 0.3s; }
-.device-list:hover::-webkit-scrollbar-thumb { background: #2a5a8a; }
-.device-list::-webkit-scrollbar-thumb:hover { background: #3a7aaa; }
-
 .panel-title {
-  font-size: 11px;
-  letter-spacing: 1px;
-  color: #6699bb;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
-  margin-bottom: 10px;
-  text-align: center;
+  color: #9aa5b4;
+  padding: 10px 8px 6px;
   flex-shrink: 0;
 }
+
+.device-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 6px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s;
+}
+.device-list:hover { scrollbar-color: #d0d7de #f5f7fa; }
+.device-list::-webkit-scrollbar { width: 4px; }
+.device-list::-webkit-scrollbar-track { background: transparent; }
+.device-list::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+.device-list:hover::-webkit-scrollbar-thumb { background: #d0d7de; }
+.device-list::-webkit-scrollbar-thumb:hover { background: #b0bac6; }
 
 .device-item {
   display: flex;
@@ -917,14 +1076,17 @@ export default {
   align-items: center;
   gap: 4px;
   padding: 8px 4px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: grab;
-  transition: background 0.15s;
+  transition: background 0.12s, box-shadow 0.12s;
   user-select: none;
 }
-.device-item:hover { background: #1a3050; }
-.device-item:hover .device-icon { transform: scale(1.1); }
-.device-item:active { cursor: grabbing; }
+.device-item:hover {
+  background: #eff4ff;
+  box-shadow: 0 1px 4px rgba(37,99,235,0.08);
+}
+.device-item:hover .device-icon { transform: scale(1.08); }
+.device-item:active { cursor: grabbing; background: #dbeafe; }
 
 .device-icon {
   width: 40px;
@@ -936,159 +1098,305 @@ export default {
 
 .device-label {
   font-size: 10px;
-  color: #8ab4cc;
+  color: #5a6a7e;
   text-align: center;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 
-/* ── 中间画布区 ── */
+/* ── 上传图标区 ── */
+.upload-icon-area {
+  flex-shrink: 0;
+  padding: 6px 8px 8px;
+  border-top: 1px solid #e4e8ed;
+}
+
+.upload-icon-btn {
+  width: 100%;
+  padding: 6px 0;
+  border-radius: 6px;
+  border: 1.5px dashed #b0bac6;
+  background: transparent;
+  color: #9aa5b4;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.upload-icon-btn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff4ff;
+}
+
+/* ══════════════════════════════════════════
+   中间画布区
+   ══════════════════════════════════════════ */
 .canvas-area {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   position: relative;
+  background: #f8f9fb;
 }
 
+/* 工具栏 */
 .canvas-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #0b1a2e;
-  border-bottom: 1px solid #1a3a5c;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #e4e8ed;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
+/* 基础按钮 */
 .tb-btn {
   padding: 4px 12px;
-  border-radius: 4px;
-  border: 1px solid #2a4a6c;
-  background: #0f2540;
-  color: #b0d0f0;
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+  background: #ffffff;
+  color: #5a6a7e;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.15s;
+  font-weight: 500;
+  transition: all 0.12s;
+  white-space: nowrap;
 }
-.tb-btn:hover:not(:disabled) { background: #1a3a60; border-color: #4488aa; }
-.tb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tb-btn.active { background: #1a4a30; border-color: #00cc88; color: #00ffaa; }
-.tb-btn.danger:hover:not(:disabled) { background: #4a1a1a; border-color: #cc4444; }
-.tb-btn.primary { background: #0a3060; border-color: #2266aa; color: #66bbff; }
-.tb-btn.primary:hover { background: #1a4a80; }
+.tb-btn:hover:not(:disabled) {
+  background: #f0f2f5;
+  border-color: #b0bac6;
+  color: #1a2332;
+}
+.tb-btn:disabled { opacity: 0.38; cursor: not-allowed; }
 
-.tb-label { font-size: 12px; color: #8ab4cc; white-space: nowrap; }
+/* 激活态（连线模式） */
+.tb-btn.active {
+  background: #eff4ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+  font-weight: 600;
+}
 
+/* 危险按钮 */
+.tb-btn.danger { color: #ef4444; border-color: #fca5a5; }
+.tb-btn.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+/* 主操作按钮 */
+.tb-btn.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.tb-btn.primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+/* 颜色选择 */
 .tb-color {
   width: 28px;
   height: 24px;
-  padding: 1px 2px;
-  border: 1px solid #2a4a6c;
-  border-radius: 4px;
-  background: #0f2540;
+  padding: 1px;
+  border: 1px solid #d0d7de;
+  border-radius: 5px;
+  background: #ffffff;
   cursor: pointer;
   vertical-align: middle;
 }
 .tb-color:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.tb-sep { width: 1px; height: 20px; background: #2a4a6c; flex-shrink: 0; }
+/* 工具栏标签 */
+.tb-label {
+  font-size: 12px;
+  color: #9aa5b4;
+  white-space: nowrap;
+  font-weight: 500;
+}
 
-.hint { font-size: 11px; color: #ffdd88; margin-left: 8px; }
-
-.editor-svg { flex: 1; display: block; width: 100%; }
-
-/* ── 右侧属性面板 ── */
-.prop-panel {
-  width: 190px;
+/* 工具栏分隔线 */
+.tb-sep {
+  width: 1px;
+  height: 18px;
+  background: #e4e8ed;
   flex-shrink: 0;
-  background: #0b1a2e;
-  border-left: 1px solid #1a3a5c;
-  padding: 10px;
+  margin: 0 2px;
+}
+
+/* 连线提示文字 */
+.hint {
+  font-size: 11px;
+  color: #d97706;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-left: 4px;
+}
+
+/* SVG 画布 */
+.editor-svg {
+  flex: 1;
+  display: block;
+  width: 100%;
+}
+
+/* ══════════════════════════════════════════
+   右侧属性面板
+   ══════════════════════════════════════════ */
+.prop-panel {
+  width: 196px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-left: 1px solid #e4e8ed;
+  padding: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 }
+.prop-panel:hover { scrollbar-color: #d0d7de #f5f7fa; }
 
+/* 面板分组标题 */
 .prop-section {
-  font-size: 11px;
-  color: #6699bb;
-  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: 1px;
-  margin-top: 4px;
+  text-transform: uppercase;
+  color: #9aa5b4;
+  padding: 12px 12px 4px;
+  border-bottom: 1px solid #f0f2f5;
   margin-bottom: 2px;
 }
 
+/* 属性标签 */
 label {
   font-size: 11px;
-  color: #7aa0bb;
+  color: #5a6a7e;
   display: block;
-  margin-top: 6px;
-  margin-bottom: 2px;
+  margin: 8px 12px 2px;
+  font-weight: 500;
 }
 
+/* 文本输入框 */
 .prop-input {
-  width: 100%;
-  padding: 4px 6px;
-  background: #06101e;
-  border: 1px solid #2a4a6c;
-  border-radius: 4px;
-  color: #c8e0f8;
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  padding: 5px 8px;
+  background: #f8f9fb;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  color: #1a2332;
   font-size: 12px;
   outline: none;
   box-sizing: border-box;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
-.prop-input:focus { border-color: #3a7aaa; }
-.prop-input:disabled { opacity: 0.5; }
+.prop-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.12);
+  background: #ffffff;
+}
+.prop-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
+/* 颜色输入框 */
 .prop-color {
-  width: 100%;
-  height: 28px;
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  height: 30px;
   padding: 2px;
-  background: #06101e;
-  border: 1px solid #2a4a6c;
-  border-radius: 4px;
+  background: #f8f9fb;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
   cursor: pointer;
   box-sizing: border-box;
 }
 
+/* Checkbox 行 */
 .row-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
-  color: #a0c0d8;
-  margin-top: 6px;
+  color: #5a6a7e;
+  margin: 6px 12px;
   cursor: pointer;
+  font-weight: 500;
 }
+.row-label input[type="checkbox"] { accent-color: #2563eb; cursor: pointer; }
 
-.dir-group { display: flex; gap: 4px; margin-bottom: 4px; }
+/* 流向按钮组 */
+.dir-group {
+  display: flex;
+  gap: 4px;
+  margin: 0 12px 4px;
+}
 
 .dir-btn {
   flex: 1;
   padding: 4px 2px;
   font-size: 11px;
-  border-radius: 4px;
-  border: 1px solid #2a4a6c;
-  background: #06101e;
-  color: #7aa0bb;
+  border-radius: 5px;
+  border: 1px solid #d0d7de;
+  background: #f8f9fb;
+  color: #5a6a7e;
   cursor: pointer;
   text-align: center;
-  transition: all 0.15s;
+  transition: all 0.12s;
   white-space: nowrap;
+  font-weight: 500;
 }
-.dir-btn:hover { background: #1a3050; color: #b0d0f0; }
-.dir-btn.active { background: #0a3060; border-color: #3a88cc; color: #66ccff; font-weight: 600; }
+.dir-btn:hover { background: #f0f2f5; border-color: #b0bac6; color: #1a2332; }
+.dir-btn.active {
+  background: #eff4ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+  font-weight: 600;
+}
 
-.slider-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
-.slider-row input[type="range"] { flex: 1; accent-color: #3a8aaa; cursor: pointer; }
-.slider-row span { min-width: 28px; text-align: right; font-size: 11px; color: #88bbdd; }
-
-.hint-text {
+/* 滑块行 */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 2px;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+.slider-row span {
+  min-width: 30px;
+  text-align: right;
   font-size: 11px;
-  color: #446688;
+  color: #9aa5b4;
+  font-weight: 600;
+}
+
+/* 无选中提示 */
+.hint-text {
+  font-size: 12px;
+  color: #b0bac6;
   text-align: center;
-  margin-top: 20px;
-  line-height: 1.6;
+  margin-top: 40px;
+  line-height: 2;
+  padding: 0 12px;
+}
+
+/* 折点信息 */
+.waypoint-info {
+  font-size: 11px;
+  color: #9aa5b4;
+  margin: 2px 12px;
 }
 </style>

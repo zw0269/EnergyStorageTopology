@@ -35,11 +35,66 @@ export function buildGlowFilter(defs, filterId, stdDeviation = 3.5) {
 }
 
 /**
+ * 将 points 数组构建为 SVG path d 字符串（折线）
+ * @param {{x:number,y:number}[]} points
+ * @returns {string}
+ */
+export function buildPolylinePath(points) {
+  if (!points || points.length < 2) return ''
+  return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+}
+
+/**
+ * 计算折线各段的累积长度信息
+ * 返回 { segments, totalLen }
+ * segments[i] = { x1, y1, x2, y2, len, cumLen, angle }
+ * @param {{x:number,y:number}[]} points
+ */
+function buildSegments(points) {
+  const segments = []
+  let totalLen = 0
+  for (let i = 0; i < points.length - 1; i++) {
+    const x1 = points[i].x, y1 = points[i].y
+    const x2 = points[i + 1].x, y2 = points[i + 1].y
+    const len = Math.hypot(x2 - x1, y2 - y1)
+    const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI
+    segments.push({ x1, y1, x2, y2, len, cumLen: totalLen, angle })
+    totalLen += len
+  }
+  return { segments, totalLen }
+}
+
+/**
+ * 沿折线按 frac(0..1) 计算当前点坐标和角度
+ * @param {{ segments, totalLen }} segInfo
+ * @param {number} frac - 0..1 沿总长的比例
+ * @returns {{ x: number, y: number, angle: number }}
+ */
+function pointAlongPolyline(segInfo, frac) {
+  const { segments, totalLen } = segInfo
+  if (totalLen === 0) return { x: segments[0].x1, y: segments[0].y1, angle: 0 }
+  const dist = frac * totalLen
+  for (const seg of segments) {
+    if (dist <= seg.cumLen + seg.len) {
+      const t = (dist - seg.cumLen) / seg.len
+      return {
+        x: seg.x1 + t * (seg.x2 - seg.x1),
+        y: seg.y1 + t * (seg.y2 - seg.y1),
+        angle: seg.angle,
+      }
+    }
+  }
+  // 末端
+  const last = segments[segments.length - 1]
+  return { x: last.x2, y: last.y2, angle: last.angle }
+}
+
+/**
  * 创建一个独立的 rAF 动画循环控制器
  * 返回 { animArrows, start, stop }
  *
- * animArrows: 动画元素数组，每项结构：
- *   { haloEl, arrowEl, ax1, ay1, ax2, ay2, angle, phase, speed }
+ * animArrows 每项结构：
+ *   { haloEl, arrowEl, segInfo, phase, speed }
  *
  * @returns {{ animArrows: Array, start: Function, stop: Function }}
  */
@@ -54,9 +109,8 @@ export function createAnimLoop() {
       animArrows.forEach(a => {
         try {
           const frac = ((t / a.speed) + a.phase) % 1
-          const x = a.ax1 + frac * (a.ax2 - a.ax1)
-          const y = a.ay1 + frac * (a.ay2 - a.ay1)
-          const tf = `translate(${x},${y}) rotate(${a.angle})`
+          const pos = pointAlongPolyline(a.segInfo, frac)
+          const tf = `translate(${pos.x},${pos.y}) rotate(${pos.angle})`
           a.haloEl.attr('transform', tf)
           a.arrowEl.attr('transform', tf)
         } catch (_) { /* 元素已被移除，静默跳过 */ }
@@ -79,36 +133,33 @@ export function createAnimLoop() {
 
 /**
  * 在 d3 group 中绘制一条边的流动箭头，并将动画项推入 animArrows
+ * 支持直线（points 长度为 2）和折线（points 长度 > 2）
  *
  * @param {object} params
  * @param {import('d3').Selection} params.group - 要追加元素的 d3 group
  * @param {object} params.edge - 边数据对象
- * @param {number} params.x1 - 起点 x
- * @param {number} params.y1 - 起点 y
- * @param {number} params.x2 - 终点 x
- * @param {number} params.y2 - 终点 y
+ * @param {{x:number,y:number}[]} params.points - 折线顶点数组（至少 2 个）
  * @param {string} params.color - 颜色
  * @param {string} params.glowFilterId - glow 滤镜 id
  * @param {Array}  params.animArrows - 动画项数组（由 createAnimLoop 返回）
  * @param {object} params.defaults - 全局默认值 { flowDash, flowGap, flowSpeed }
  */
-export function drawFlowArrows({ group, edge, x1, y1, x2, y2, color, glowFilterId, animArrows, defaults }) {
-  const totalLen = Math.hypot(x2 - x1, y2 - y1)
-  if (totalLen < 1) return
+export function drawFlowArrows({ group, edge, points, color, glowFilterId, animArrows, defaults }) {
+  if (!points || points.length < 2) return
 
   const flowDir = edge.flowDirection || 'forward'
   if (flowDir === 'stop') return
 
+  // 方向决定顶点顺序
+  const orderedPoints = flowDir === 'reverse' ? [...points].reverse() : points
+
+  const segInfo = buildSegments(orderedPoints)
+  if (segInfo.totalLen < 1) return
+
   const r     = edge.flowDash  ?? defaults.flowDash  ?? 5
   const gap   = edge.flowGap   ?? defaults.flowGap   ?? 50
   const speed = Math.max(0.1, edge.flowSpeed ?? defaults.flowSpeed ?? 1.5)
-  const count = Math.max(1, Math.round(totalLen / gap))
-
-  const [ax1, ay1, ax2, ay2] = flowDir === 'reverse'
-    ? [x2, y2, x1, y1]
-    : [x1, y1, x2, y2]
-
-  const angle = Math.atan2(ay2 - ay1, ax2 - ax1) * 180 / Math.PI
+  const count = Math.max(1, Math.round(segInfo.totalLen / gap))
 
   for (let k = 0; k < count; k++) {
     const phase = k / count
@@ -126,6 +177,6 @@ export function drawFlowArrows({ group, edge, x1, y1, x2, y2, color, glowFilterI
       .attr('opacity', 1)
       .attr('pointer-events', 'none')
 
-    animArrows.push({ haloEl, arrowEl, ax1, ay1, ax2, ay2, angle, phase, speed })
+    animArrows.push({ haloEl, arrowEl, segInfo, phase, speed })
   }
 }

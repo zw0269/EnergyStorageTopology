@@ -1,7 +1,7 @@
 <template>
   <div id="app">
 
-    <!-- 顶部 Tab 导航 -->
+    <!-- 顶部导航 -->
     <nav class="app-nav">
       <span class="app-title">⚡ 储能通信拓扑图</span>
       <div class="tab-group">
@@ -21,7 +21,7 @@
       <TopologyCanvas
         :width="canvasW"
         :height="canvasH"
-        background="#0d1b2a"
+        background="#f0f2f5"
         :nodes="topoNodes"
         :edges="topoEdges"
         @node-click="onNodeClick"
@@ -49,7 +49,7 @@
 import TopologyCanvas from './components/TopologyCanvas.vue'
 import TopologyEditor from './components/TopologyEditor.vue'
 
-const NAV_HEIGHT = 48
+const NAV_HEIGHT = 52
 const PADDING = 40
 
 export default {
@@ -97,59 +97,70 @@ export default {
 </script>
 
 <style>
+/* ── 全局重置 ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
-  background: #06101e;
-  font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: #f0f2f5;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 #app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  color: #c8e0f8;
+  color: #1a2332;
 }
 
-/* ── 顶栏 ── */
+/* ── 顶部导航栏 ── */
 .app-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  height: 48px;
-  background: #0b1a2e;
-  border-bottom: 1px solid #1a3a5c;
+  padding: 0 24px;
+  height: 52px;
+  background: #ffffff;
+  border-bottom: 1px solid #e4e8ed;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .app-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  color: #7ecfff;
-  letter-spacing: 1px;
-  text-shadow: 0 0 8px rgba(0, 180, 255, 0.4);
+  color: #2563eb;
+  letter-spacing: 0.5px;
 }
 
-.tab-group { display: flex; gap: 6px; }
+/* ── Tab 按钮组 ── */
+.tab-group {
+  display: flex;
+  gap: 4px;
+  background: #f0f2f5;
+  padding: 3px;
+  border-radius: 8px;
+}
 
 .tab-btn {
-  padding: 5px 18px;
-  border-radius: 5px;
-  border: 1px solid #2a4a6c;
-  background: #0f2540;
-  color: #80a8c8;
+  padding: 5px 20px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #5a6a7e;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
   transition: all 0.15s;
 }
-.tab-btn:hover { background: #1a3a60; color: #b0d8f8; }
+.tab-btn:hover { color: #1a2332; background: rgba(255,255,255,0.7); }
 .tab-btn.active {
-  background: #0a3060;
-  border-color: #3388cc;
-  color: #7ecfff;
+  background: #ffffff;
+  color: #2563eb;
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 /* ── 页面容器 ── */
@@ -165,7 +176,7 @@ html, body {
   align-items: center;
   padding: 20px;
   overflow: auto;
-  background: #06101e;
+  background: #f0f2f5;
 }
 
 .editor-page {
@@ -177,14 +188,20 @@ html, body {
 /* ── 预览页信息栏 ── */
 .info-bar {
   margin-top: 12px;
+  padding: 6px 14px;
+  background: #ffffff;
+  border: 1px solid #e4e8ed;
+  border-radius: 6px;
   font-size: 13px;
-  color: #7ecfff;
+  color: #2563eb;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .empty-hint {
-  margin-top: 40px;
+  margin-top: 60px;
   font-size: 14px;
-  color: #3a6a9a;
+  color: #9aa5b4;
   text-align: center;
+  line-height: 2;
 }
 </style>

@@ -22,7 +22,7 @@
 
 <script>
 import * as d3 from 'd3'
-import { buildGlowFilter, createAnimLoop, drawFlowArrows } from '@/utils/flowAnimation'
+import { buildGlowFilter, createAnimLoop, drawFlowArrows, buildPolylinePath } from '@/utils/flowAnimation'
 
 export default {
   name: 'TopologyCanvas',
@@ -30,7 +30,7 @@ export default {
   props: {
     width:  { type: Number, default: 1200 },
     height: { type: Number, default: 800 },
-    background: { type: String, default: '#0d1b2a' },
+    background: { type: String, default: '#f0f2f5' },
     nodes: { type: Array, default: () => [] },
     edges: { type: Array, default: () => [] },
     // 全局流动动画默认参数（可被每条边的字段覆盖）
@@ -111,29 +111,35 @@ export default {
         const tgt = nodeMap[edge.to]
         if (!src || !tgt) return
 
-        const x1 = src.x, y1 = src.y, x2 = tgt.x, y2 = tgt.y
         const color   = edge.color || '#ffffff'
         const strokeW = edge.width || 2
         const colorId = color.replace(/[^a-zA-Z0-9]/g, '')
-        const motionPath = `M${x1},${y1} L${x2},${y2}`
+
+        // 构建折线顶点数组（含 waypoints）
+        const points = [
+          { x: src.x, y: src.y },
+          ...(edge.waypoints || []),
+          { x: tgt.x, y: tgt.y },
+        ]
+        const pathD = buildPolylinePath(points)
 
         // 底层轨迹线
         const track = edgeGroup.append('path')
-          .attr('d', motionPath)
+          .attr('d', pathD)
           .attr('stroke', color)
           .attr('stroke-width', strokeW)
           .attr('fill', 'none')
-          .attr('opacity', edge.animated ? 0.2 : 1)
+          .attr('opacity', 1)
           .attr('marker-end', edge.arrow !== false ? `url(#arrow-${colorId})` : null)
 
         if (edge.dashed) track.attr('stroke-dasharray', '6,4')
 
-        // 流动箭头（使用公共工具，flowGap 已生效）
+        // 流动箭头（支持折线，flowGap 已生效）
         if (edge.animated) {
           drawFlowArrows({
             group: edgeGroup,
             edge,
-            x1, y1, x2, y2,
+            points,
             color,
             glowFilterId: 'tc-glow',
             animArrows: this._anim.animArrows,
@@ -145,11 +151,13 @@ export default {
           })
         }
 
-        // 线段标签
+        // 线段标签（显示在折线中点）
         if (edge.label) {
+          const mid = points[Math.floor(points.length / 2)]
+          const prev = points[Math.floor(points.length / 2) - 1] || points[0]
           edgeGroup.append('text')
-            .attr('x', (x1 + x2) / 2)
-            .attr('y', (y1 + y2) / 2 - 8)
+            .attr('x', (mid.x + prev.x) / 2)
+            .attr('y', (mid.y + prev.y) / 2 - 8)
             .attr('text-anchor', 'middle')
             .attr('fill', color)
             .attr('font-size', 11)
@@ -201,8 +209,10 @@ export default {
 <style scoped>
 .topology-wrapper {
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 10px;
   display: inline-block;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e4e8ed;
 }
 .topology-svg { display: block; }
 </style>

@@ -234,6 +234,79 @@ this.canvasH = window.innerHeight - 48 - 40  // 导航栏高度 + 内边距
 
 ---
 
+---
+
+### 新功能迭代记录（2026-04-04）
+
+#### A1-A2. 自定义图标上传
+
+**文件：** `TopologyEditor.vue`
+
+**新增功能：**
+- 设备面板底部新增「+ 上传图标」按钮（dashed 风格），接受 `image/png`、`image/jpeg`、`image/svg+xml`、`image/webp`
+- 读取文件转为 base64 DataURL，动态追加到 `deviceTypes` 列表，可立即拖拽使用
+- 自定义图标持久化到 `localStorage['topology_custom_icons']`，下次打开自动恢复
+- `exportJSON` 时自定义节点额外写入 `src` 字段（base64），导入后无需重新上传也能还原图标
+- `loadConfig` 已有 `deviceType` 不存在时回退到 `node.src` 的逻辑，无需额外修改
+
+---
+
+#### B1-B4. 折线连线（多段 waypoints）
+
+**文件：** `src/utils/flowAnimation.js`、`TopologyCanvas.vue`、`TopologyEditor.vue`
+
+**新增功能：**
+- `edge.waypoints: [{x,y},...]` 字段存储折点坐标
+- `buildPolylinePath(points)` 工具函数生成多段 SVG path
+- 动画工具 `drawFlowArrows` 改为 `points[]` 入参，沿折线各段插值计算粒子位置和朝向角度
+- 编辑器中选中边后，折点渲染为黄色可拖拽控制柄（d3.drag 实时更新路径）
+- 属性面板添加「+ 添加折点」（在最后一段中点插入）和「清除全部折点」按钮
+- 预览画布 TopologyCanvas 同步支持 waypoints 折线渲染
+
+---
+
+#### C1. 修复动画/非动画线条底色不一致
+
+**文件：** `TopologyCanvas.vue`、`TopologyEditor.vue`
+
+**问题：** 轨迹线 `opacity: edge.animated ? 0.2 : 1`，勾选流动动画后线变透明，关闭动画又变实色，视觉跳变。
+
+**修复：** 两个组件中轨迹线 opacity 固定为 `1`，选中态的 opacity 也一并去掉，仅保留 `drop-shadow` 高亮。
+
+---
+
+---
+
+### 样式重构（2026-04-04）
+
+#### STYLE. 全页面深色主题 → 灰白浅色主题
+
+**文件：** `App.vue`、`TopologyEditor.vue`、`TopologyCanvas.vue`
+
+**变更内容：**
+
+| 区域 | 重构前 | 重构后 |
+|------|--------|--------|
+| 页面底色 | `#06101e` 深蓝黑 | `#f0f2f5` 浅灰 |
+| 顶部导航 | `#0b1a2e` 深底 + 蓝字 | `#ffffff` 白底 + `box-shadow` + 蓝色强调字 |
+| Tab 切换 | 深色按钮边框 | 胶囊选择器，灰底白激活+蓝字 |
+| 设备面板 | `#0b1a2e` 深底 | `#ffffff` 白底，hover 蓝色浅底 |
+| 画布工具栏 | `#0b1a2e` 深底 | `#ffffff` 白底，按钮 outlined 风格 |
+| 属性面板 | `#0b1a2e` 深底 | `#ffffff` 白底，输入框 `#f8f9fb` 浅底 |
+| 输入框 | 深色底+亮色文字 | 浅底+深色文字，focus 蓝色描边 |
+| 流向按钮 | 深色激活 | 蓝色浅底激活 |
+| 警告提示 | 黄色纯文字 | 琥珀色 badge 风格 |
+| 预览画布 | `#0d1b2a` 深底 | `#f0f2f5` 浅灰底，带圆角+阴影卡片 |
+| 预览节点信息栏 | 纯色文字 | 白色 badge 卡片 |
+
+设计令牌（局部注释归档）：
+- `--bg-page: #f0f2f5` / `--bg-panel: #ffffff` / `--bg-canvas: #f8f9fb`
+- `--border: #e4e8ed` / `--border-mid: #d0d7de`
+- `--text-primary: #1a2332` / `--text-secondary: #5a6a7e` / `--text-muted: #9aa5b4`
+- `--accent: #2563eb` / `--danger: #ef4444` / `--success: #16a34a`
+
+---
+
 ## 已知局限
 
 - **Vue 2 EOL（2023-12-31）**：建议后续迁移至 Vue 3 + Vite
