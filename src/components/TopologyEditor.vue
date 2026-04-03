@@ -145,6 +145,14 @@
           <input v-model="selectedEl.data.arrow" type="checkbox" @change="rerenderD3" />
           显示箭头
         </label>
+        <template v-if="selectedEl.data.animated">
+          <label>粒子形状</label>
+          <div class="shape-group">
+            <button v-for="opt in flowShapeOptions" :key="opt.value"
+              :class="['dir-btn', { active: (selectedEl.data.flowShape || 'arrow') === opt.value }]"
+              @click="setFlowShape(opt.value)">{{ opt.label }}</button>
+          </div>
+        </template>
 
         <!-- 折点操作 -->
         <div class="prop-section" style="margin-top:10px">折点</div>
@@ -200,6 +208,14 @@ export default {
         { value: 'forward', label: '▶ 正向' },
         { value: 'stop',    label: '⏸ 停止' },
         { value: 'reverse', label: '◀ 反向' },
+      ],
+
+      flowShapeOptions: [
+        { value: 'arrow',    label: '→ 箭头' },
+        { value: 'circle',   label: '● 圆形' },
+        { value: 'square',   label: '■ 方形' },
+        { value: 'diamond',  label: '◆ 菱形' },
+        { value: 'triangle', label: '▶ 三角' },
       ],
 
       // ── 设备面板（语义化 type 命名）──
@@ -480,7 +496,7 @@ export default {
           grp.append('text')
             .attr('x', w / 2).attr('y', h + 15)
             .attr('text-anchor', 'middle')
-            .attr('fill', node.labelColor || '#e0f0ff')
+            .attr('fill', node.labelColor || '#5a6a7e')
             .attr('font-size', 12)
             .attr('font-family', 'sans-serif')
             .attr('pointer-events', 'none')
@@ -604,7 +620,7 @@ export default {
         width: 64,
         height: 64,
         label: `${device.label} ${this.nodeCounter}`,
-        labelColor: '#e0f0ff',
+        labelColor: '#5a6a7e',
       }
       this.editorNodes.push(newNode)
       this.rerenderD3()
@@ -687,6 +703,13 @@ export default {
     setFlowDir(dir) {
       if (this.selectedEl?.type === 'edge') {
         this.selectedEl.data.flowDirection = dir
+        this.rerenderD3()
+      }
+    },
+
+    setFlowShape(shape) {
+      if (this.selectedEl?.type === 'edge') {
+        this.selectedEl.data.flowShape = shape
         this.rerenderD3()
       }
     },
@@ -1339,6 +1362,14 @@ label {
   display: flex;
   gap: 4px;
   margin: 0 12px 4px;
+}
+
+/* 粒子形状按钮组：3列自动换行 */
+.shape-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin: 0 12px 8px;
 }
 
 .dir-btn {

@@ -185,7 +185,7 @@ export default {
           group.append('text')
             .attr('x', w / 2).attr('y', h + 16)
             .attr('text-anchor', 'middle')
-            .attr('fill', node.labelColor || '#e0f0ff')
+            .attr('fill', node.labelColor || '#5a6a7e')
             .attr('font-size', 12)
             .attr('font-family', 'sans-serif')
             .text(node.label)

@@ -14,6 +14,59 @@ export function arrowPath(r) {
 }
 
 /**
+ * 生成圆形 SVG 路径字符串（贝塞尔曲线近似）
+ * @param {number} r
+ * @returns {string}
+ */
+export function circlePath(r) {
+  const k = r * 0.552284
+  return `M 0,${-r} C ${k},${-r} ${r},${-k} ${r},0 C ${r},${k} ${k},${r} 0,${r} C ${-k},${r} ${-r},${k} ${-r},0 C ${-r},${-k} ${-k},${-r} 0,${-r} Z`
+}
+
+/**
+ * 生成正方形 SVG 路径字符串
+ * @param {number} r
+ * @returns {string}
+ */
+export function squarePath(r) {
+  return `M ${-r},${-r} L ${r},${-r} L ${r},${r} L ${-r},${r} Z`
+}
+
+/**
+ * 生成菱形 SVG 路径字符串
+ * @param {number} r
+ * @returns {string}
+ */
+export function diamondPath(r) {
+  return `M 0,${-r} L ${r},0 L 0,${r} L ${-r},0 Z`
+}
+
+/**
+ * 生成三角形 SVG 路径字符串，尖端朝 +x 方向
+ * @param {number} r
+ * @returns {string}
+ */
+export function trianglePath(r) {
+  return `M ${r},0 L ${-r},${-r * 0.85} L ${-r},${r * 0.85} Z`
+}
+
+/**
+ * 根据形状名称返回对应的 SVG path 字符串
+ * @param {string} shape - 'arrow'|'circle'|'square'|'diamond'|'triangle'
+ * @param {number} r
+ * @returns {string}
+ */
+export function shapePathOf(shape, r) {
+  switch (shape) {
+    case 'circle':   return circlePath(r)
+    case 'square':   return squarePath(r)
+    case 'diamond':  return diamondPath(r)
+    case 'triangle': return trianglePath(r)
+    default:         return arrowPath(r)
+  }
+}
+
+/**
  * 在 SVG defs 中构建 glow 滤镜
  * @param {import('d3').Selection} defs - d3 select 的 <defs> 节点
  * @param {string} filterId - 滤镜 id（需在页面内唯一）
@@ -159,20 +212,21 @@ export function drawFlowArrows({ group, edge, points, color, glowFilterId, animA
   const r     = edge.flowDash  ?? defaults.flowDash  ?? 5
   const gap   = edge.flowGap   ?? defaults.flowGap   ?? 50
   const speed = Math.max(0.1, edge.flowSpeed ?? defaults.flowSpeed ?? 1.5)
+  const shape = edge.flowShape || 'arrow'
   const count = Math.max(1, Math.round(segInfo.totalLen / gap))
 
   for (let k = 0; k < count; k++) {
     const phase = k / count
 
     const haloEl = group.append('path')
-      .attr('d', arrowPath(r * 1.8))
+      .attr('d', shapePathOf(shape, r * 1.8))
       .attr('fill', color)
       .attr('opacity', 0.25)
       .attr('filter', `url(#${glowFilterId})`)
       .attr('pointer-events', 'none')
 
     const arrowEl = group.append('path')
-      .attr('d', arrowPath(r))
+      .attr('d', shapePathOf(shape, r))
       .attr('fill', color)
       .attr('opacity', 1)
       .attr('pointer-events', 'none')
